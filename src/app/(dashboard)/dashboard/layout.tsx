@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
+import { DashboardNav } from "@/components/shared/dashboard-nav";
 
 // Defense in depth (architecture.md §6.5): middleware already conceals
 // unauthenticated access with a 404 rewrite before requests reach here, but
@@ -10,5 +11,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
     redirect("/access");
   }
 
-  return <div className="min-h-screen p-6">{children}</div>;
+  return (
+    <div className="min-h-screen space-y-6 p-6">
+      <DashboardNav />
+      {children}
+    </div>
+  );
 }

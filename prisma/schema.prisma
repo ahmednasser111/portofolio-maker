@@ -1,5 +1,7 @@
-// M0 scope only: identity + tenancy. See docs/database-design.md for the
-// full model — Profile, Project, Theme, etc. land in later milestones.
+// M0: identity + tenancy. M1: portfolio content (Profile, Projects, Skills,
+// Experience, Education, Social Links). Theme/Analytics/Imports/Assets land
+// in later milestones. See docs/database-design.md for the full model and
+// docs/milestones/ for what deviates from it and why.
 
 generator client {
   provider = "prisma-client-js"
@@ -18,16 +20,31 @@ enum MembershipRole {
 }
 
 model User {
-  id           String    @id
-  email        String    @unique
+  id           String   @id
+  email        String   @unique
   name         String?
   image        String?
   passwordHash String?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   accounts    Account[]
   memberships Membership[]
+
+  createdProfiles    Profile[]       @relation("ProfileCreatedBy")
+  updatedProfiles    Profile[]       @relation("ProfileUpdatedBy")
+  createdProjects    Project[]       @relation("ProjectCreatedBy")
+  updatedProjects    Project[]       @relation("ProjectUpdatedBy")
+  createdSkillCats   SkillCategory[] @relation("SkillCategoryCreatedBy")
+  updatedSkillCats   SkillCategory[] @relation("SkillCategoryUpdatedBy")
+  createdSkills      Skill[]         @relation("SkillCreatedBy")
+  updatedSkills      Skill[]         @relation("SkillUpdatedBy")
+  createdExperiences Experience[]    @relation("ExperienceCreatedBy")
+  updatedExperiences Experience[]    @relation("ExperienceUpdatedBy")
+  createdEducations  Education[]     @relation("EducationCreatedBy")
+  updatedEducations  Education[]     @relation("EducationUpdatedBy")
+  createdSocialLinks SocialLink[]    @relation("SocialLinkCreatedBy")
+  updatedSocialLinks SocialLink[]    @relation("SocialLinkUpdatedBy")
 
   @@map("users")
 }
@@ -77,7 +94,15 @@ model Workspace {
 
   // activeThemeId lands in M2 once the Theme table exists.
 
-  memberships Membership[]
+  memberships       Membership[]
+  profile           Profile?
+  projectCategories ProjectCategory[]
+  projects          Project[]
+  skillCategories   SkillCategory[]
+  skills            Skill[]
+  experiences       Experience[]
+  educations        Education[]
+  socialLinks       SocialLink[]
 
   @@map("workspaces")
 }
@@ -95,4 +120,288 @@ model Membership {
   @@id([userId, workspaceId])
   @@index([workspaceId])
   @@map("memberships")
+}
+
+// ---------------------------------------------------------------------------
+// M1: Portfolio content
+// ---------------------------------------------------------------------------
+
+enum AvailabilityStatus {
+  AVAILABLE
+  UNAVAILABLE
+  OPEN_TO_OFFERS
+}
+
+enum ProjectStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+// Provenance only — GitHub/Resume import pipelines are M3/M4. Every M1
+// project is MANUAL; the other values and the externalId/importedAt/
+// sourceSnapshot columns below just ensure the schema won't need to change
+// when those pipelines land.
+enum ContentSource {
+  MANUAL
+  GITHUB
+  RESUME
+}
+
+enum ProjectLinkType {
+  REPOSITORY
+  LIVE_DEMO
+  DOCUMENTATION
+  OTHER
+}
+
+enum SkillLevel {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+  EXPERT
+}
+
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+  FREELANCE
+  INTERNSHIP
+  VOLUNTEER
+}
+
+// 1:1 with Workspace. avatarUrl/resumeUrl are plain links for now — the
+// DDD's Asset table (blob storage, checksum, upload pipeline) is deferred
+// until a milestone actually needs file uploads.
+model Profile {
+  id           String              @id
+  workspaceId  String              @unique
+  displayName  String
+  position     String?
+  headline     String?
+  bio          Json?
+  avatarUrl    String?
+  location     String?
+  availability AvailabilityStatus?
+  email        String?
+  phone        String?
+  heroCtaLabel String?
+  heroCtaUrl   String?
+  resumeUrl    String?
+  createdById  String?
+  updatedById  String?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User?     @relation("ProfileCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy User?     @relation("ProfileUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@map("profiles")
+}
+
+// New entity (not in the original DDD) mirroring SkillCategory — categories
+// as rows, not a free-text column, per the DDD's own normalization rule
+// (§1). Deleting a category SetNulls Project.categoryId rather than
+// cascading, unlike SkillCategory→Skill: a project is an independent,
+// valuable entity; a skill is a meaningless leaf outside its category.
+// Configuration-like (same rule-of-thumb as NavigationItem) — no soft
+// delete, no audit columns.
+model ProjectCategory {
+  id          String   @id
+  workspaceId String
+  name        String
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  projects  Project[]
+
+  @@unique([workspaceId, name])
+  @@map("project_categories")
+}
+
+model Project {
+  id          String        @id
+  workspaceId String
+  categoryId  String?
+  title       String
+  // Partial-unique (workspaceId, slug) WHERE deleted_at IS NULL — hand-edited
+  // into the migration SQL; see database-design.md §4.3 / §14.3. Do not
+  // regenerate this migration from the schema without re-applying that edit.
+  slug        String
+  summary     String?
+  description Json?
+  status      ProjectStatus @default(DRAFT)
+  featured    Boolean       @default(false)
+  sortOrder   Int           @default(0)
+  startDate   DateTime?
+  endDate     DateTime?
+  tags        String[]
+
+  source         ContentSource @default(MANUAL)
+  externalId     String?
+  importedAt     DateTime?
+  sourceSnapshot Json?
+
+  createdById String?
+  updatedById String?
+  deletedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  workspace Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  category  ProjectCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  createdBy User?            @relation("ProjectCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy User?            @relation("ProjectUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  links     ProjectLink[]
+
+  @@unique([workspaceId, slug])
+  @@index([workspaceId, status, sortOrder])
+  @@index([workspaceId, source, externalId])
+  @@map("projects")
+}
+
+model ProjectLink {
+  id          String          @id
+  workspaceId String
+  projectId   String
+  type        ProjectLinkType
+  label       String?
+  url         String
+  sortOrder   Int             @default(0)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, sortOrder])
+  @@map("project_links")
+}
+
+model SkillCategory {
+  id          String    @id
+  workspaceId String
+  name        String
+  sortOrder   Int       @default(0)
+  createdById String?
+  updatedById String?
+  deletedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User?     @relation("SkillCategoryCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy User?     @relation("SkillCategoryUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  skills    Skill[]
+
+  // Partial-unique (workspaceId, name) WHERE deleted_at IS NULL — hand-edited,
+  // same convention as projects.slug.
+  @@unique([workspaceId, name])
+  @@index([workspaceId, sortOrder])
+  @@map("skill_categories")
+}
+
+model Skill {
+  id          String      @id
+  workspaceId String
+  categoryId  String
+  name        String
+  level       SkillLevel?
+  iconKey     String?
+  visible     Boolean     @default(true)
+  sortOrder   Int         @default(0)
+  createdById String?
+  updatedById String?
+  deletedAt   DateTime?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  workspace Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  category  SkillCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  createdBy User?         @relation("SkillCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy User?         @relation("SkillUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  // Partial-unique (workspaceId, name) WHERE deleted_at IS NULL — hand-edited,
+  // same convention as projects.slug. Doubles as the resume-import dedupe
+  // anchor once that pipeline lands (M4).
+  @@unique([workspaceId, name])
+  @@index([categoryId, sortOrder])
+  @@map("skills")
+}
+
+model Experience {
+  id             String          @id
+  workspaceId    String
+  company        String
+  role           String
+  location       String?
+  employmentType EmploymentType?
+  startDate      DateTime
+  endDate        DateTime?
+  highlights     Json?
+  description    String?
+  visible        Boolean         @default(true)
+  sortOrder      Int             @default(0)
+  createdById    String?
+  updatedById    String?
+  deletedAt      DateTime?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User?     @relation("ExperienceCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy User?     @relation("ExperienceUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, sortOrder])
+  @@map("experiences")
+}
+
+model Education {
+  id          String    @id
+  workspaceId String
+  institution String
+  degree      String?
+  field       String?
+  startDate   DateTime?
+  endDate     DateTime?
+  description String?
+  visible     Boolean   @default(true)
+  sortOrder   Int       @default(0)
+  createdById String?
+  updatedById String?
+  deletedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User?     @relation("EducationCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy User?     @relation("EducationUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, sortOrder])
+  @@map("educations")
+}
+
+model SocialLink {
+  id          String    @id
+  workspaceId String
+  platform    String
+  iconKey     String?
+  url         String
+  sortOrder   Int       @default(0)
+  visible     Boolean   @default(true)
+  createdById String?
+  updatedById String?
+  deletedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User?     @relation("SocialLinkCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy User?     @relation("SocialLinkUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, sortOrder])
+  @@map("social_links")
 }
