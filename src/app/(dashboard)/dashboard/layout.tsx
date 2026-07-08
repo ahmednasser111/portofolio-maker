@@ -1,0 +1,14 @@
+import { redirect } from "next/navigation";
+import { auth } from "@/auth";
+
+// Defense in depth (architecture.md §6.5): middleware already conceals
+// unauthenticated access with a 404 rewrite before requests reach here, but
+// this layout re-verifies independently rather than trusting that alone.
+export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
+  const session = await auth();
+  if (!session?.user) {
+    redirect("/access");
+  }
+
+  return <div className="min-h-screen p-6">{children}</div>;
+}

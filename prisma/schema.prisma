@@ -1,0 +1,98 @@
+// M0 scope only: identity + tenancy. See docs/database-design.md for the
+// full model — Profile, Project, Theme, etc. land in later milestones.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum MembershipRole {
+  OWNER
+  ADMIN
+  EDITOR
+  VIEWER
+}
+
+model User {
+  id           String    @id
+  email        String    @unique
+  name         String?
+  image        String?
+  passwordHash String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  accounts    Account[]
+  memberships Membership[]
+
+  @@map("users")
+}
+
+// Auth.js OAuth account linkage. Unused until an OAuth provider is added
+// (v1 login is Credentials-only) — included now per the DDD so it never
+// needs a later migration.
+model Account {
+  id                String  @id
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+// Auth.js email-verification flow. Unused until email/OAuth login exists.
+model VerificationToken {
+  id         String   @id
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+model Workspace {
+  id           String   @id
+  slug         String   @unique
+  siteTitle    String?
+  isPublished  Boolean  @default(false)
+  customDomain String?  @unique
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // activeThemeId lands in M2 once the Theme table exists.
+
+  memberships Membership[]
+
+  @@map("workspaces")
+}
+
+// Composite natural PK — no surrogate id, no UUIDv7 (see src/lib/db.ts).
+model Membership {
+  userId      String
+  workspaceId String
+  role        MembershipRole
+  joinedAt    DateTime       @default(now())
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@id([userId, workspaceId])
+  @@index([workspaceId])
+  @@map("memberships")
+}
