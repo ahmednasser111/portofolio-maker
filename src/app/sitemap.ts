@@ -5,6 +5,10 @@ import { listPublishedProjects } from "@/features/projects/queries";
 import { db } from "@/lib/db";
 import { env } from "@/lib/env";
 
+// Reads the database — without this, Next tries to prerender it at build
+// time (same reason every DB-touching page in this app sets it).
+export const dynamic = "force-dynamic";
+
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const workspace = await getDefaultWorkspace();
   const [navLinks, projects] = await Promise.all([
