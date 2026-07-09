@@ -1,5 +1,9 @@
+import type { Metadata } from "next";
 import { getDefaultWorkspace } from "@/lib/workspace";
 import { listVisibleSkillsByCategory } from "@/features/skills/queries";
+import { requireEnabledPage } from "@/features/navigation/queries";
+import { resolveSeoMetadata } from "@/features/seo/queries";
+import { toMetadata } from "@/features/seo/to-metadata";
 
 export const dynamic = "force-dynamic";
 
@@ -10,8 +14,14 @@ const levelLabels: Record<string, string> = {
   EXPERT: "Expert",
 };
 
+export async function generateMetadata(): Promise<Metadata> {
+  const workspace = await getDefaultWorkspace();
+  return toMetadata(await resolveSeoMetadata(workspace.id, "SKILLS"));
+}
+
 export default async function SkillsPage() {
   const workspace = await getDefaultWorkspace();
+  await requireEnabledPage(workspace.id, "SKILLS");
   const categories = await listVisibleSkillsByCategory(workspace.id);
   const nonEmptyCategories = categories.filter((c) => c.skills.length > 0);
 

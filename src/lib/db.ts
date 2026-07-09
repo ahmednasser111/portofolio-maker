@@ -4,7 +4,7 @@ import { uuidv7 } from "uuidv7";
 // Models with a UUIDv7 `id` primary key (see docs/database-design.md §1).
 // `Membership` is deliberately excluded — it uses the natural composite PK
 // `(userId, workspaceId)`. Add new model names here as they're introduced
-// in later milestones (Theme in M2, etc).
+// in later milestones.
 const UUID_ID_MODELS = new Set([
   "User",
   "Account",
@@ -19,6 +19,10 @@ const UUID_ID_MODELS = new Set([
   "Experience",
   "Education",
   "SocialLink",
+  "Theme",
+  "NavigationItem",
+  "SeoSetting",
+  "ContactMessage",
 ]);
 
 function withUuidV7(client: PrismaClient) {

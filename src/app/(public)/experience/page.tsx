@@ -1,5 +1,9 @@
+import type { Metadata } from "next";
 import { getDefaultWorkspace } from "@/lib/workspace";
 import { listVisibleExperiences } from "@/features/experience/queries";
+import { requireEnabledPage } from "@/features/navigation/queries";
+import { resolveSeoMetadata } from "@/features/seo/queries";
+import { toMetadata } from "@/features/seo/to-metadata";
 import { richTextListItems } from "@/lib/rich-text";
 
 export const dynamic = "force-dynamic";
@@ -13,8 +17,14 @@ const employmentTypeLabels: Record<string, string> = {
   VOLUNTEER: "Volunteer",
 };
 
+export async function generateMetadata(): Promise<Metadata> {
+  const workspace = await getDefaultWorkspace();
+  return toMetadata(await resolveSeoMetadata(workspace.id, "EXPERIENCE"));
+}
+
 export default async function ExperiencePage() {
   const workspace = await getDefaultWorkspace();
+  await requireEnabledPage(workspace.id, "EXPERIENCE");
   const experiences = await listVisibleExperiences(workspace.id);
 
   return (

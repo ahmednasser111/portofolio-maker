@@ -1,10 +1,20 @@
+import type { Metadata } from "next";
 import { getDefaultWorkspace } from "@/lib/workspace";
 import { listVisibleEducation } from "@/features/education/queries";
+import { requireEnabledPage } from "@/features/navigation/queries";
+import { resolveSeoMetadata } from "@/features/seo/queries";
+import { toMetadata } from "@/features/seo/to-metadata";
 
 export const dynamic = "force-dynamic";
 
+export async function generateMetadata(): Promise<Metadata> {
+  const workspace = await getDefaultWorkspace();
+  return toMetadata(await resolveSeoMetadata(workspace.id, "EDUCATION"));
+}
+
 export default async function EducationPage() {
   const workspace = await getDefaultWorkspace();
+  await requireEnabledPage(workspace.id, "EDUCATION");
   const education = await listVisibleEducation(workspace.id);
 
   return (

@@ -1,20 +1,34 @@
 import Link from "next/link";
+import type { Metadata } from "next";
 import { getDefaultWorkspace } from "@/lib/workspace";
 import { getProfile } from "@/features/profile/queries";
 import { availabilityLabels } from "@/features/profile/labels";
 import { richTextToParagraphs } from "@/lib/rich-text";
 import { listFeaturedProjects } from "@/features/projects/queries";
 import { listVisibleSocialLinks } from "@/features/social-links/queries";
+import { getActiveThemeTokens } from "@/features/theme/queries";
+import { requireEnabledPage } from "@/features/navigation/queries";
+import { resolveSeoMetadata } from "@/features/seo/queries";
+import { toMetadata } from "@/features/seo/to-metadata";
+import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
+export async function generateMetadata(): Promise<Metadata> {
+  const workspace = await getDefaultWorkspace();
+  return toMetadata(await resolveSeoMetadata(workspace.id, "HOME"));
+}
+
 export default async function HomePage() {
   const workspace = await getDefaultWorkspace();
-  const [profile, featuredProjects, socialLinks] = await Promise.all([
+  await requireEnabledPage(workspace.id, "HOME");
+  const [profile, featuredProjects, socialLinks, tokens] = await Promise.all([
     getProfile(workspace.id),
     listFeaturedProjects(workspace.id),
     listVisibleSocialLinks(workspace.id),
+    getActiveThemeTokens(workspace.id),
   ]);
+  const heroSplit = tokens.layout.hero === "split";
 
   if (!profile) {
     return (
@@ -31,42 +45,55 @@ export default async function HomePage() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-10 p-8">
-      <section className="space-y-3 text-center">
+      <section
+        className={cn(
+          heroSplit
+            ? "flex flex-col items-center gap-6 text-left sm:flex-row"
+            : "space-y-3 text-center",
+        )}
+      >
         {profile.avatarUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={profile.avatarUrl}
             alt={profile.displayName}
-            className="mx-auto h-24 w-24 rounded-full object-cover"
+            className={cn(
+              "rounded-full object-cover",
+              heroSplit ? "h-32 w-32 shrink-0" : "mx-auto h-24 w-24",
+            )}
           />
         ) : null}
-        <h1 className="text-3xl font-semibold">{profile.displayName}</h1>
-        {profile.position ? <p className="text-lg text-muted-foreground">{profile.position}</p> : null}
-        {profile.headline ? <p className="text-muted-foreground">{profile.headline}</p> : null}
-        {profile.availability ? (
-          <p className="text-sm text-muted-foreground">
-            {availabilityLabels[profile.availability]}
-          </p>
-        ) : null}
-        <div className="flex justify-center gap-3 pt-2">
-          {profile.heroCtaLabel && profile.heroCtaUrl ? (
-            <Link
-              href={profile.heroCtaUrl}
-              className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground"
-            >
-              {profile.heroCtaLabel}
-            </Link>
+        <div className={cn("space-y-3", heroSplit && "text-left")}>
+          <h1 className="text-3xl font-semibold">{profile.displayName}</h1>
+          {profile.position ? (
+            <p className="text-lg text-muted-foreground">{profile.position}</p>
           ) : null}
-          {profile.resumeUrl ? (
-            <a
-              href={profile.resumeUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="rounded-md border px-4 py-2 text-sm"
-            >
-              Download resume
-            </a>
+          {profile.headline ? <p className="text-muted-foreground">{profile.headline}</p> : null}
+          {profile.availability ? (
+            <p className="text-sm text-muted-foreground">
+              {availabilityLabels[profile.availability]}
+            </p>
           ) : null}
+          <div className={cn("flex gap-3 pt-2", !heroSplit && "justify-center")}>
+            {profile.heroCtaLabel && profile.heroCtaUrl ? (
+              <Link
+                href={profile.heroCtaUrl}
+                className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground"
+              >
+                {profile.heroCtaLabel}
+              </Link>
+            ) : null}
+            {profile.resumeUrl ? (
+              <a
+                href={profile.resumeUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="rounded-md border px-4 py-2 text-sm"
+              >
+                Download resume
+              </a>
+            ) : null}
+          </div>
         </div>
       </section>
 

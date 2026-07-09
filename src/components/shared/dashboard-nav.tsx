@@ -12,6 +12,10 @@ const links = [
   { href: "/dashboard/experience", label: "Experience" },
   { href: "/dashboard/education", label: "Education" },
   { href: "/dashboard/social", label: "Social links" },
+  { href: "/dashboard/theme", label: "Theme" },
+  { href: "/dashboard/navigation", label: "Navigation" },
+  { href: "/dashboard/seo", label: "SEO" },
+  { href: "/dashboard/messages", label: "Messages" },
 ];
 
 export function DashboardNav() {

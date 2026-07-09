@@ -84,15 +84,14 @@ model VerificationToken {
 }
 
 model Workspace {
-  id           String   @id
-  slug         String   @unique
-  siteTitle    String?
-  isPublished  Boolean  @default(false)
-  customDomain String?  @unique
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  // activeThemeId lands in M2 once the Theme table exists.
+  id            String   @id
+  slug          String   @unique
+  siteTitle     String?
+  isPublished   Boolean  @default(false)
+  customDomain  String?  @unique
+  activeThemeId String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   memberships       Membership[]
   profile           Profile?
@@ -103,6 +102,11 @@ model Workspace {
   experiences       Experience[]
   educations        Education[]
   socialLinks       SocialLink[]
+  themes            Theme[]           @relation("ThemeWorkspace")
+  activeTheme       Theme?            @relation("WorkspaceActiveTheme", fields: [activeThemeId], references: [id], onDelete: Restrict)
+  navigationItems   NavigationItem[]
+  seoSettings       SeoSetting[]
+  contactMessages   ContactMessage[]
 
   @@map("workspaces")
 }
@@ -404,4 +408,102 @@ model SocialLink {
 
   @@index([workspaceId, sortOrder])
   @@map("social_links")
+}
+
+// ---------------------------------------------------------------------------
+// M2: Presentation control (Theme, Navigation, SEO, Contact)
+// ---------------------------------------------------------------------------
+
+// Closed by code — each value is a built public route. CERTIFICATIONS is
+// reserved (matches database-design.md §5) but not seeded into
+// NavigationItem yet since that module doesn't exist (cut from M1).
+enum NavigationPage {
+  HOME
+  ABOUT
+  SKILLS
+  EXPERIENCE
+  EDUCATION
+  CERTIFICATIONS
+  PROJECTS
+  CONTACT
+  RESUME
+}
+
+// workspaceId NULL ⇒ global preset (database-design.md §4.6, §11). Activating
+// a preset clones it into a workspace-owned row (basePresetId records the
+// lineage) rather than referencing it directly — preset updates never mutate
+// live sites. CHECK isPreset=true ⇒ workspaceId IS NULL is hand-edited into
+// the migration (no native Prisma support for CHECK constraints).
+model Theme {
+  id            String   @id
+  workspaceId   String?
+  name          String
+  tokens        Json
+  schemaVersion Int      @default(1)
+  isPreset      Boolean  @default(false)
+  basePresetId  String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  workspace           Workspace?  @relation("ThemeWorkspace", fields: [workspaceId], references: [id], onDelete: Cascade)
+  basePreset          Theme?      @relation("ThemeLineage", fields: [basePresetId], references: [id], onDelete: SetNull)
+  clonedFrom          Theme[]     @relation("ThemeLineage")
+  activeForWorkspaces Workspace[] @relation("WorkspaceActiveTheme")
+
+  @@index([workspaceId])
+  @@map("themes")
+}
+
+model NavigationItem {
+  id          String         @id
+  workspaceId String
+  page        NavigationPage
+  customLabel String?
+  sortOrder   Int            @default(0)
+  enabled     Boolean        @default(true)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, page])
+  @@map("navigation_items")
+}
+
+// page NULL ⇒ workspace-default row. ogImageUrl is a plain string, not an
+// Asset FK — same file-handling deferral as Profile.avatarUrl/resumeUrl (M1).
+// Unique (workspaceId, page) NULLS NOT DISTINCT — hand-edited (PG15+), same
+// convention as the M1 partial-unique indexes.
+model SeoSetting {
+  id          String          @id
+  workspaceId String
+  page        NavigationPage?
+  title       String?
+  description String?
+  ogImageUrl  String?
+  noindex     Boolean         @default(false)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, page])
+  @@map("seo_settings")
+}
+
+// Hard delete, no soft delete, no audit columns — visitor-created, per
+// database-design.md §1/§4.5.
+model ContactMessage {
+  id          String    @id
+  workspaceId String
+  senderName  String
+  senderEmail String
+  body        String
+  readAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt(sort: Desc)])
+  @@map("contact_messages")
 }

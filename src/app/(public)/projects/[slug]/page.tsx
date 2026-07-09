@@ -1,6 +1,9 @@
 import { notFound } from "next/navigation";
+import type { Metadata } from "next";
 import { getDefaultWorkspace } from "@/lib/workspace";
 import { getPublishedProjectBySlug } from "@/features/projects/queries";
+import { requireEnabledPage } from "@/features/navigation/queries";
+import { resolveSeoMetadata } from "@/features/seo/queries";
 import { richTextToParagraphs } from "@/lib/rich-text";
 
 export const dynamic = "force-dynamic";
@@ -12,13 +15,36 @@ const linkTypeLabels: Record<string, string> = {
   OTHER: "Link",
 };
 
-export default async function ProjectDetailPage({
-  params,
-}: {
-  params: Promise<{ slug: string }>;
-}) {
+type ProjectDetailPageProps = { params: Promise<{ slug: string }> };
+
+// A project's own title/summary make a better title/description than the
+// PROJECTS page's SeoSetting — that row still supplies the OG image/noindex
+// fallback when the project doesn't override them.
+export async function generateMetadata({ params }: ProjectDetailPageProps): Promise<Metadata> {
   const { slug } = await params;
   const workspace = await getDefaultWorkspace();
+  const [project, seo] = await Promise.all([
+    getPublishedProjectBySlug(workspace.id, slug),
+    resolveSeoMetadata(workspace.id, "PROJECTS"),
+  ]);
+  if (!project) return {};
+
+  return {
+    title: project.title,
+    description: project.summary ?? seo.description ?? undefined,
+    robots: seo.noindex ? { index: false, follow: false } : undefined,
+    openGraph: {
+      title: project.title,
+      description: project.summary ?? seo.description ?? undefined,
+      images: seo.ogImageUrl ? [seo.ogImageUrl] : undefined,
+    },
+  };
+}
+
+export default async function ProjectDetailPage({ params }: ProjectDetailPageProps) {
+  const { slug } = await params;
+  const workspace = await getDefaultWorkspace();
+  await requireEnabledPage(workspace.id, "PROJECTS");
   const project = await getPublishedProjectBySlug(workspace.id, slug);
 
   if (!project) notFound();
