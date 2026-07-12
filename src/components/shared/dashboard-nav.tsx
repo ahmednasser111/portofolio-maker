@@ -16,6 +16,8 @@ const links = [
   { href: "/dashboard/navigation", label: "Navigation" },
   { href: "/dashboard/seo", label: "SEO" },
   { href: "/dashboard/messages", label: "Messages" },
+  { href: "/dashboard/integrations", label: "Integrations" },
+  { href: "/dashboard/imports/github", label: "Import from GitHub" },
 ];
 
 export function DashboardNav() {

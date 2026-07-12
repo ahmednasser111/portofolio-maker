@@ -23,6 +23,9 @@ const UUID_ID_MODELS = new Set([
   "NavigationItem",
   "SeoSetting",
   "ContactMessage",
+  "ProviderConnection",
+  "ImportSession",
+  "ImportItem",
 ]);
 
 function withUuidV7(client: PrismaClient) {

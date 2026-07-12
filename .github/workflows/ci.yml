@@ -9,6 +9,9 @@ on:
 env:
   DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci"
   AUTH_SECRET: "ci-only-placeholder-secret-not-used-at-runtime"
+  # 32 raw bytes, base64 — must decode to exactly 32 bytes (src/lib/env.ts),
+  # never used to encrypt anything real in CI, so no secret needed.
+  ENCRYPTION_KEY: "7BuXXAOGtAQy/HCn49n6/ezoRKA7bbGvxBW8SRm2DyQ="
 
 jobs:
   build:

@@ -31,20 +31,21 @@ model User {
   accounts    Account[]
   memberships Membership[]
 
-  createdProfiles    Profile[]       @relation("ProfileCreatedBy")
-  updatedProfiles    Profile[]       @relation("ProfileUpdatedBy")
-  createdProjects    Project[]       @relation("ProjectCreatedBy")
-  updatedProjects    Project[]       @relation("ProjectUpdatedBy")
-  createdSkillCats   SkillCategory[] @relation("SkillCategoryCreatedBy")
-  updatedSkillCats   SkillCategory[] @relation("SkillCategoryUpdatedBy")
-  createdSkills      Skill[]         @relation("SkillCreatedBy")
-  updatedSkills      Skill[]         @relation("SkillUpdatedBy")
-  createdExperiences Experience[]    @relation("ExperienceCreatedBy")
-  updatedExperiences Experience[]    @relation("ExperienceUpdatedBy")
-  createdEducations  Education[]     @relation("EducationCreatedBy")
-  updatedEducations  Education[]     @relation("EducationUpdatedBy")
-  createdSocialLinks SocialLink[]    @relation("SocialLinkCreatedBy")
-  updatedSocialLinks SocialLink[]    @relation("SocialLinkUpdatedBy")
+  createdProfiles       Profile[]       @relation("ProfileCreatedBy")
+  updatedProfiles       Profile[]       @relation("ProfileUpdatedBy")
+  createdProjects       Project[]       @relation("ProjectCreatedBy")
+  updatedProjects       Project[]       @relation("ProjectUpdatedBy")
+  createdSkillCats      SkillCategory[] @relation("SkillCategoryCreatedBy")
+  updatedSkillCats      SkillCategory[] @relation("SkillCategoryUpdatedBy")
+  createdSkills         Skill[]         @relation("SkillCreatedBy")
+  updatedSkills         Skill[]         @relation("SkillUpdatedBy")
+  createdExperiences    Experience[]    @relation("ExperienceCreatedBy")
+  updatedExperiences    Experience[]    @relation("ExperienceUpdatedBy")
+  createdEducations     Education[]     @relation("EducationCreatedBy")
+  updatedEducations     Education[]     @relation("EducationUpdatedBy")
+  createdSocialLinks    SocialLink[]    @relation("SocialLinkCreatedBy")
+  updatedSocialLinks    SocialLink[]    @relation("SocialLinkUpdatedBy")
+  createdImportSessions ImportSession[] @relation("ImportSessionCreatedBy")
 
   @@map("users")
 }
@@ -93,20 +94,22 @@ model Workspace {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  memberships       Membership[]
-  profile           Profile?
-  projectCategories ProjectCategory[]
-  projects          Project[]
-  skillCategories   SkillCategory[]
-  skills            Skill[]
-  experiences       Experience[]
-  educations        Education[]
-  socialLinks       SocialLink[]
-  themes            Theme[]           @relation("ThemeWorkspace")
-  activeTheme       Theme?            @relation("WorkspaceActiveTheme", fields: [activeThemeId], references: [id], onDelete: Restrict)
-  navigationItems   NavigationItem[]
-  seoSettings       SeoSetting[]
-  contactMessages   ContactMessage[]
+  memberships         Membership[]
+  profile             Profile?
+  projectCategories   ProjectCategory[]
+  projects            Project[]
+  skillCategories     SkillCategory[]
+  skills              Skill[]
+  experiences         Experience[]
+  educations          Education[]
+  socialLinks         SocialLink[]
+  themes              Theme[]              @relation("ThemeWorkspace")
+  activeTheme         Theme?               @relation("WorkspaceActiveTheme", fields: [activeThemeId], references: [id], onDelete: Restrict)
+  navigationItems     NavigationItem[]
+  seoSettings         SeoSetting[]
+  contactMessages     ContactMessage[]
+  providerConnections ProviderConnection[]
+  importSessions      ImportSession[]
 
   @@map("workspaces")
 }
@@ -506,4 +509,135 @@ model ContactMessage {
 
   @@index([workspaceId, createdAt(sort: Desc)])
   @@map("contact_messages")
+}
+
+// ---------------------------------------------------------------------------
+// M3: Provider framework (GitHub import + Vercel linking)
+// ---------------------------------------------------------------------------
+
+// RESUME is reserved for M4 (same unseeded-enum-value convention as
+// NavigationPage.CERTIFICATIONS) — resume import has no connection step
+// (plain file upload), so RESUME will only ever appear on ImportSession.provider,
+// never on a ProviderConnection row. Application-level rule, not schema-enforced.
+enum ProviderType {
+  GITHUB
+  VERCEL
+  RESUME
+}
+
+enum ConnectionStatus {
+  ACTIVE
+  EXPIRED
+  REVOKED
+  ERROR
+}
+
+// PROCESSING and ROLLED_BACK are reserved for M4 (async LLM extraction /
+// undo) — GitHub sessions in M3 only ever move PENDING -> REVIEWING ->
+// COMMITTED/DISCARDED/FAILED, same "full enum, partial exercise" convention
+// used for M2's ImportSessionStatus... this is that enum's first landing.
+enum ImportSessionStatus {
+  PENDING
+  PROCESSING
+  REVIEWING
+  COMMITTED
+  DISCARDED
+  FAILED
+  ROLLED_BACK
+}
+
+enum ImportItemStatus {
+  PENDING
+  ACCEPTED
+  EDITED
+  REJECTED
+  SKIPPED_DUPLICATE
+  COMMITTED
+}
+
+// EXPERIENCE, EDUCATION, SKILL, CERTIFICATION, PROFILE_SUMMARY are reserved
+// for M4 (resume import fans out to all of them) — GitHub import in M3 only
+// ever produces PROJECT items.
+enum ImportTargetType {
+  PROJECT
+  EXPERIENCE
+  EDUCATION
+  SKILL
+  CERTIFICATION
+  PROFILE_SUMMARY
+}
+
+// One row per provider per workspace. Hard delete on disconnect (token must
+// not linger, even soft-deleted) — see database-design.md §1. encryptedToken
+// is base64 AES-256-GCM ciphertext+IV+authTag; keyVersion records which
+// ENCRYPTION_KEY encrypted it so key rotation is a background re-encrypt,
+// not a crisis (DDD §14.7).
+model ProviderConnection {
+  id             String           @id
+  workspaceId    String
+  provider       ProviderType
+  encryptedToken String
+  keyVersion     Int              @default(1)
+  accountMeta    Json?
+  status         ConnectionStatus @default(ACTIVE)
+  connectedAt    DateTime         @default(now())
+  lastCheckedAt  DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, provider])
+  @@map("provider_connections")
+}
+
+// One row per import run (a GitHub repo-selection batch). sourceAssetId
+// (resume PDF pointer) is deferred until M4 introduces the Asset table —
+// same file-handling deferral already used for Profile.avatarUrl/resumeUrl
+// and SeoSetting.ogImageUrl.
+model ImportSession {
+  id                   String              @id
+  workspaceId          String
+  provider             ProviderType
+  status               ImportSessionStatus @default(PENDING)
+  rawPayload           Json?
+  payloadSchemaVersion Int?
+  error                String?
+  committedAt          DateTime?
+  createdById          String?
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  workspace Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User?        @relation("ImportSessionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  items     ImportItem[]
+
+  @@index([workspaceId, provider, status])
+  @@map("import_sessions")
+}
+
+// workspaceId is redundant with sessionId->workspaceId but kept per the DDD's
+// deliberate redundant-scoping rule (§1) so every query filters locally
+// without a join. duplicateOfId / createdEntityType+createdEntityId are
+// loose polymorphic pointers, no FK — see database-design.md §9.6.
+model ImportItem {
+  id                String           @id
+  sessionId         String
+  workspaceId       String
+  targetType        ImportTargetType
+  data              Json
+  dataSchemaVersion Int              @default(1)
+  status            ImportItemStatus @default(PENDING)
+  duplicateOfId     String?
+  createdEntityType String?
+  createdEntityId   String?
+  externalId        String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  session ImportSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([workspaceId, targetType, externalId])
+  @@map("import_items")
 }

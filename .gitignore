@@ -10,3 +10,7 @@ out/
 prisma/*.db
 *.tsbuildinfo
 .claude/
+
+# Stakpak session files
+.stakpak/session*
+.env*

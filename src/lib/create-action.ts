@@ -30,6 +30,18 @@ function fail<T>(code: ErrorCode, message: string): ActionResult<T> {
   return { ok: false, error: { code, message } };
 }
 
+// Lets a handler surface a specific ErrorCode (e.g. PROVIDER_ERROR for a
+// rejected GitHub/Vercel token) instead of collapsing every throw to a
+// generic INTERNAL — see the catch block below.
+export class ActionError extends Error {
+  constructor(
+    public code: ErrorCode,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 // Composes auth -> policy -> Zod validation -> handler -> envelope, so
 // every server action gets the same guarantees by construction instead of
 // each one remembering to check auth/policy itself (architecture.md §8).
@@ -81,6 +93,9 @@ export function createAction<TSchema extends z.ZodType, TOutput>(config: {
       const data = await config.handler(parsed.data, { actor });
       return { ok: true, data };
     } catch (error) {
+      if (error instanceof ActionError) {
+        return fail(error.code, error.message);
+      }
       console.error(error);
       return fail("INTERNAL", "Something went wrong.");
     }
