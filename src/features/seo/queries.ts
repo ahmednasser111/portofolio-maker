@@ -2,7 +2,7 @@ import { db } from "@/lib/db";
 import type { NavigationPage } from "@prisma/client";
 
 export function listSeoSettings(workspaceId: string) {
-  return db.seoSetting.findMany({ where: { workspaceId } });
+  return db.seoSetting.findMany({ where: { workspaceId }, include: { ogImageAsset: true } });
 }
 
 export type ResolvedSeo = {
@@ -24,15 +24,15 @@ export async function resolveSeoMetadata(
   // that hand-edit) — see database-design.md §14.3's hand-edited-migration
   // convention. The DB constraint still guarantees at most one row either way.
   const [pageRow, defaultRow, workspace] = await Promise.all([
-    db.seoSetting.findFirst({ where: { workspaceId, page } }),
-    db.seoSetting.findFirst({ where: { workspaceId, page: null } }),
+    db.seoSetting.findFirst({ where: { workspaceId, page }, include: { ogImageAsset: true } }),
+    db.seoSetting.findFirst({ where: { workspaceId, page: null }, include: { ogImageAsset: true } }),
     db.workspace.findUniqueOrThrow({ where: { id: workspaceId } }),
   ]);
 
   return {
     title: pageRow?.title ?? defaultRow?.title ?? workspace.siteTitle ?? workspace.slug,
     description: pageRow?.description ?? defaultRow?.description ?? null,
-    ogImageUrl: pageRow?.ogImageUrl ?? defaultRow?.ogImageUrl ?? null,
+    ogImageUrl: pageRow?.ogImageAsset?.url ?? defaultRow?.ogImageAsset?.url ?? null,
     noindex: pageRow?.noindex ?? defaultRow?.noindex ?? false,
   };
 }

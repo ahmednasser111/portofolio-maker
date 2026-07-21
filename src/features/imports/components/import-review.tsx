@@ -10,11 +10,18 @@ import {
   commitImportSessionAction,
   discardImportSessionAction,
 } from "../actions";
-import type { ProjectDraft } from "@/domain/imports/target-schemas";
+import type {
+  ProjectDraft,
+  ExperienceDraft,
+  EducationDraft,
+  SkillDraft,
+  ProfileSummaryDraft,
+} from "@/domain/imports/target-schemas";
 
 type ReviewItem = {
   id: string;
   status: string;
+  targetType: string;
   externalId: string | null;
   data: unknown;
 };
@@ -28,13 +35,129 @@ const STATUS_STYLE: Record<string, string> = {
   COMMITTED: "bg-purple-100 text-purple-800",
 };
 
-function ReviewRow({ item }: { item: ReviewItem }) {
-  const router = useRouter();
-  const draft = item.data as ProjectDraft;
-  const [editing, setEditing] = useState(false);
+// One line each — the review screen's job is "what is this row", not a full
+// preview. Project gets a dedicated structured editor below (it's the
+// original/most-used target); the M4 targets share a plain JSON editor
+// rather than four bespoke inline forms — a deliberate scope call for this
+// milestone (see the milestone doc).
+function describeItem(targetType: string, data: unknown): { title: string; subtitle: string | null } {
+  switch (targetType) {
+    case "PROJECT": {
+      const d = data as ProjectDraft;
+      return { title: d.title, subtitle: d.summary };
+    }
+    case "EXPERIENCE": {
+      const d = data as ExperienceDraft;
+      return { title: `${d.role} @ ${d.company}`, subtitle: `${d.startDate} – ${d.endDate ?? "present"}` };
+    }
+    case "EDUCATION": {
+      const d = data as EducationDraft;
+      return { title: d.institution, subtitle: d.degree };
+    }
+    case "SKILL": {
+      const d = data as SkillDraft;
+      return { title: d.name, subtitle: d.categoryName };
+    }
+    case "PROFILE_SUMMARY": {
+      const d = data as ProfileSummaryDraft;
+      return { title: "Profile summary", subtitle: d.headline };
+    }
+    default:
+      return { title: targetType, subtitle: null };
+  }
+}
+
+function ProjectEditor({
+  draft,
+  onSave,
+  onCancel,
+  isPending,
+}: {
+  draft: ProjectDraft;
+  onSave: (next: ProjectDraft) => void;
+  onCancel: () => void;
+  isPending: boolean;
+}) {
   const [title, setTitle] = useState(draft.title);
   const [summary, setSummary] = useState(draft.summary ?? "");
   const [tags, setTags] = useState(draft.tags.join(", "));
+
+  return (
+    <div className="space-y-2">
+      <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" />
+      <Textarea value={summary} onChange={(e) => setSummary(e.target.value)} placeholder="Summary" rows={2} />
+      <Input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="Tags (comma-separated)" />
+      <div className="flex gap-2">
+        <Button
+          type="button"
+          size="sm"
+          disabled={isPending}
+          onClick={() =>
+            onSave({
+              ...draft,
+              title,
+              summary: summary.trim().length > 0 ? summary.trim() : null,
+              tags: tags.split(",").map((t) => t.trim()).filter((t) => t.length > 0),
+            })
+          }
+        >
+          Save edit
+        </Button>
+        <Button type="button" size="sm" variant="outline" onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// Raw-JSON fallback editor for the M4 targets (see describeItem's comment).
+function JsonEditor({
+  data,
+  onSave,
+  onCancel,
+  isPending,
+}: {
+  data: unknown;
+  onSave: (next: unknown) => void;
+  onCancel: () => void;
+  isPending: boolean;
+}) {
+  const [text, setText] = useState(JSON.stringify(data, null, 2));
+  const [parseError, setParseError] = useState<string | null>(null);
+
+  return (
+    <div className="space-y-2">
+      <Textarea value={text} onChange={(e) => setText(e.target.value)} rows={8} className="font-mono text-xs" />
+      {parseError ? <p className="text-sm text-red-600">{parseError}</p> : null}
+      <div className="flex gap-2">
+        <Button
+          type="button"
+          size="sm"
+          disabled={isPending}
+          onClick={() => {
+            try {
+              onSave(JSON.parse(text));
+              setParseError(null);
+            } catch {
+              setParseError("Invalid JSON.");
+            }
+          }}
+        >
+          Save edit
+        </Button>
+        <Button type="button" size="sm" variant="outline" onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function ReviewRow({ item }: { item: ReviewItem }) {
+  const router = useRouter();
+  const { title, subtitle } = describeItem(item.targetType, item.data);
+  const [editing, setEditing] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [rowError, setRowError] = useState<string | null>(null);
 
@@ -52,23 +175,10 @@ function ReviewRow({ item }: { item: ReviewItem }) {
     });
   }
 
-  function saveEdit() {
+  function saveEdit(editedData: unknown) {
     setRowError(null);
     startTransition(async () => {
-      const editedData: ProjectDraft = {
-        ...draft,
-        title,
-        summary: summary.trim().length > 0 ? summary.trim() : null,
-        tags: tags
-          .split(",")
-          .map((t) => t.trim())
-          .filter((t) => t.length > 0),
-      };
-      const result = await reviewImportItemAction({
-        itemId: item.id,
-        decision: "EDITED",
-        editedData,
-      });
+      const result = await reviewImportItemAction({ itemId: item.id, decision: "EDITED", editedData });
       if (!result.ok) {
         setRowError(result.error.message);
         return;
@@ -87,31 +197,26 @@ function ReviewRow({ item }: { item: ReviewItem }) {
         </span>
       </div>
       {item.status === "SKIPPED_DUPLICATE" ? (
-        <p className="text-sm text-muted-foreground">
-          Skipped — a project with this GitHub repo is already imported.
-        </p>
+        <p className="text-sm text-muted-foreground">Skipped — this already exists in your portfolio.</p>
       ) : editing ? (
-        <div className="space-y-2">
-          <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" />
-          <Textarea
-            value={summary}
-            onChange={(e) => setSummary(e.target.value)}
-            placeholder="Summary"
-            rows={2}
+        item.targetType === "PROJECT" ? (
+          <ProjectEditor
+            draft={item.data as ProjectDraft}
+            onSave={saveEdit}
+            onCancel={() => setEditing(false)}
+            isPending={isPending}
           />
-          <Input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="Tags (comma-separated)" />
-          <div className="flex gap-2">
-            <Button type="button" size="sm" onClick={saveEdit} disabled={isPending}>
-              Save edit
-            </Button>
-            <Button type="button" size="sm" variant="outline" onClick={() => setEditing(false)}>
-              Cancel
-            </Button>
-          </div>
-        </div>
+        ) : (
+          <JsonEditor
+            data={item.data}
+            onSave={saveEdit}
+            onCancel={() => setEditing(false)}
+            isPending={isPending}
+          />
+        )
       ) : (
         <>
-          {draft.summary ? <p className="text-sm text-muted-foreground">{draft.summary}</p> : null}
+          {subtitle ? <p className="text-sm text-muted-foreground">{subtitle}</p> : null}
           {!locked ? (
             <div className="flex gap-2">
               <Button type="button" size="sm" onClick={() => decide("ACCEPTED")} disabled={isPending}>
@@ -188,7 +293,7 @@ export function ImportReview({
       {!isFinal ? (
         <div className="flex items-center gap-2">
           <Button type="button" onClick={onCommit} disabled={committable.length === 0 || isPending}>
-            {isPending ? "Committing…" : `Commit ${committable.length} project(s)`}
+            {isPending ? "Committing…" : `Commit ${committable.length} item(s)`}
           </Button>
           <Button type="button" variant="outline" onClick={onDiscard} disabled={isPending}>
             Discard session
@@ -196,7 +301,8 @@ export function ImportReview({
         </div>
       ) : (
         <p className="text-sm text-muted-foreground">
-          Session {sessionStatus.toLowerCase()} — {sessionStatus === "COMMITTED" ? "committed items are live." : "no changes were made."}
+          Session {sessionStatus.toLowerCase()} —{" "}
+          {sessionStatus === "COMMITTED" ? "committed items are live." : "no changes were made."}
         </p>
       )}
       {sessionError ? <p className="text-sm text-red-600">{sessionError}</p> : null}

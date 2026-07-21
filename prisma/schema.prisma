@@ -110,6 +110,7 @@ model Workspace {
   contactMessages     ContactMessage[]
   providerConnections ProviderConnection[]
   importSessions      ImportSession[]
+  assets              Asset[]
 
   @@map("workspaces")
 }
@@ -178,32 +179,80 @@ enum EmploymentType {
   VOLUNTEER
 }
 
-// 1:1 with Workspace. avatarUrl/resumeUrl are plain links for now — the
-// DDD's Asset table (blob storage, checksum, upload pipeline) is deferred
-// until a milestone actually needs file uploads.
-model Profile {
-  id           String              @id
-  workspaceId  String              @unique
-  displayName  String
-  position     String?
-  headline     String?
-  bio          Json?
-  avatarUrl    String?
-  location     String?
-  availability AvailabilityStatus?
-  email        String?
-  phone        String?
-  heroCtaLabel String?
-  heroCtaUrl   String?
-  resumeUrl    String?
-  createdById  String?
-  updatedById  String?
-  createdAt    DateTime            @default(now())
-  updatedAt    DateTime            @updatedAt
+// Upload validation rules (allowed MIME, size caps) key off kind — enforced
+// in the application layer, not the schema (database-design.md §5).
+// PROJECT_MEDIA and OTHER are unseeded until ProjectMedia / another upload
+// surface lands — same "full enum, partial exercise" convention as
+// NavigationPage.CERTIFICATIONS.
+enum AssetKind {
+  AVATAR
+  PROJECT_MEDIA
+  RESUME
+  OG_IMAGE
+  OTHER
+}
+
+// One row per uploaded file (database-design.md §4.7): avatar, resume PDF,
+// OG image today; project media once ProjectMedia lands. Soft delete only —
+// the blob itself is garbage-collected after the grace period by a future
+// job, never deleted synchronously with the row.
+model Asset {
+  id          String    @id
+  workspaceId String
+  kind        AssetKind
+  url         String
+  filename    String
+  mimeType    String
+  sizeBytes   Int
+  checksum    String
+  width       Int?
+  height      Int?
+  deletedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  createdBy User?     @relation("ProfileCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  updatedBy User?     @relation("ProfileUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  // Inverse sides of the named FK relations below — Prisma requires them
+  // even though each is effectively 0..1 in practice (one asset backs one
+  // profile avatar / resume, one SEO row's OG image, one import session).
+  profileAvatarFor       Profile[]       @relation("ProfileAvatarAsset")
+  profileResumeFor       Profile[]       @relation("ProfilePublicResumeAsset")
+  seoOgImageFor          SeoSetting[]    @relation("SeoOgImageAsset")
+  importSessionSourceFor ImportSession[] @relation("ImportSessionSourceAsset")
+
+  @@index([workspaceId, kind])
+  @@map("assets")
+}
+
+// 1:1 with Workspace. avatarAssetId/publicResumeAssetId upgraded from plain
+// URL strings to Asset FKs in M4, once the Asset table + blob upload
+// pipeline existed to back them (database-design.md §4.2, §4.7).
+model Profile {
+  id                  String              @id
+  workspaceId         String              @unique
+  displayName         String
+  position            String?
+  headline            String?
+  bio                 Json?
+  avatarAssetId       String?
+  location            String?
+  availability        AvailabilityStatus?
+  email               String?
+  phone               String?
+  heroCtaLabel        String?
+  heroCtaUrl          String?
+  publicResumeAssetId String?
+  createdById         String?
+  updatedById         String?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+
+  workspace         Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy         User?     @relation("ProfileCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy         User?     @relation("ProfileUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  avatarAsset       Asset?    @relation("ProfileAvatarAsset", fields: [avatarAssetId], references: [id], onDelete: SetNull)
+  publicResumeAsset Asset?    @relation("ProfilePublicResumeAsset", fields: [publicResumeAssetId], references: [id], onDelete: SetNull)
 
   @@map("profiles")
 }
@@ -326,6 +375,11 @@ model Skill {
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
 
+  source         ContentSource @default(MANUAL)
+  externalId     String?
+  importedAt     DateTime?
+  sourceSnapshot Json?
+
   workspace Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   category  SkillCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   createdBy User?         @relation("SkillCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
@@ -333,9 +387,10 @@ model Skill {
 
   // Partial-unique (workspaceId, name) WHERE deleted_at IS NULL — hand-edited,
   // same convention as projects.slug. Doubles as the resume-import dedupe
-  // anchor once that pipeline lands (M4).
+  // anchor (M4).
   @@unique([workspaceId, name])
   @@index([categoryId, sortOrder])
+  @@index([workspaceId, source, externalId])
   @@map("skills")
 }
 
@@ -358,11 +413,17 @@ model Experience {
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 
+  source         ContentSource @default(MANUAL)
+  externalId     String?
+  importedAt     DateTime?
+  sourceSnapshot Json?
+
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   createdBy User?     @relation("ExperienceCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   updatedBy User?     @relation("ExperienceUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
 
   @@index([workspaceId, sortOrder])
+  @@index([workspaceId, source, externalId])
   @@map("experiences")
 }
 
@@ -383,11 +444,17 @@ model Education {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
+  source         ContentSource @default(MANUAL)
+  externalId     String?
+  importedAt     DateTime?
+  sourceSnapshot Json?
+
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   createdBy User?     @relation("EducationCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   updatedBy User?     @relation("EducationUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
 
   @@index([workspaceId, sortOrder])
+  @@index([workspaceId, source, externalId])
   @@map("educations")
 }
 
@@ -473,22 +540,23 @@ model NavigationItem {
   @@map("navigation_items")
 }
 
-// page NULL ⇒ workspace-default row. ogImageUrl is a plain string, not an
-// Asset FK — same file-handling deferral as Profile.avatarUrl/resumeUrl (M1).
+// page NULL ⇒ workspace-default row. ogImageAssetId upgraded from a plain
+// string to an Asset FK in M4, same as Profile.avatarAssetId/publicResumeAssetId.
 // Unique (workspaceId, page) NULLS NOT DISTINCT — hand-edited (PG15+), same
 // convention as the M1 partial-unique indexes.
 model SeoSetting {
-  id          String          @id
-  workspaceId String
-  page        NavigationPage?
-  title       String?
-  description String?
-  ogImageUrl  String?
-  noindex     Boolean         @default(false)
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
+  id             String          @id
+  workspaceId    String
+  page           NavigationPage?
+  title          String?
+  description    String?
+  ogImageAssetId String?
+  noindex        Boolean         @default(false)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  ogImageAsset Asset?    @relation("SeoOgImageAsset", fields: [ogImageAssetId], references: [id], onDelete: SetNull)
 
   @@unique([workspaceId, page])
   @@map("seo_settings")
@@ -515,10 +583,9 @@ model ContactMessage {
 // M3: Provider framework (GitHub import + Vercel linking)
 // ---------------------------------------------------------------------------
 
-// RESUME is reserved for M4 (same unseeded-enum-value convention as
-// NavigationPage.CERTIFICATIONS) — resume import has no connection step
-// (plain file upload), so RESUME will only ever appear on ImportSession.provider,
-// never on a ProviderConnection row. Application-level rule, not schema-enforced.
+// RESUME (M4) has no connection step (plain file upload), so it only ever
+// appears on ImportSession.provider, never on a ProviderConnection row.
+// Application-level rule, not schema-enforced.
 enum ProviderType {
   GITHUB
   VERCEL
@@ -532,10 +599,9 @@ enum ConnectionStatus {
   ERROR
 }
 
-// PROCESSING and ROLLED_BACK are reserved for M4 (async LLM extraction /
-// undo) — GitHub sessions in M3 only ever move PENDING -> REVIEWING ->
-// COMMITTED/DISCARDED/FAILED, same "full enum, partial exercise" convention
-// used for M2's ImportSessionStatus... this is that enum's first landing.
+// PROCESSING is used starting M4 (async LLM extraction step for resume
+// sessions — GitHub sessions still skip straight PENDING -> REVIEWING).
+// ROLLED_BACK remains reserved — undo is not in scope for any milestone yet.
 enum ImportSessionStatus {
   PENDING
   PROCESSING
@@ -555,9 +621,10 @@ enum ImportItemStatus {
   COMMITTED
 }
 
-// EXPERIENCE, EDUCATION, SKILL, CERTIFICATION, PROFILE_SUMMARY are reserved
-// for M4 (resume import fans out to all of them) — GitHub import in M3 only
-// ever produces PROJECT items.
+// EXPERIENCE, EDUCATION, SKILL, PROFILE_SUMMARY land in M4 (resume import
+// fans out to all of them). CERTIFICATION stays reserved/unseeded — there is
+// no Certification model yet (cut from M1, not revived for M4 either); the
+// resume LLM prompt does not emit it.
 enum ImportTargetType {
   PROJECT
   EXPERIENCE
@@ -591,15 +658,15 @@ model ProviderConnection {
   @@map("provider_connections")
 }
 
-// One row per import run (a GitHub repo-selection batch). sourceAssetId
-// (resume PDF pointer) is deferred until M4 introduces the Asset table —
-// same file-handling deferral already used for Profile.avatarUrl/resumeUrl
-// and SeoSetting.ogImageUrl.
+// One row per import run (a GitHub repo-selection batch, or one resume
+// upload). sourceAssetId (resume PDF pointer) is set for RESUME-provider
+// sessions only; GitHub sessions leave it null — no rawPayload file either.
 model ImportSession {
   id                   String              @id
   workspaceId          String
   provider             ProviderType
   status               ImportSessionStatus @default(PENDING)
+  sourceAssetId        String?
   rawPayload           Json?
   payloadSchemaVersion Int?
   error                String?
@@ -608,9 +675,10 @@ model ImportSession {
   createdAt            DateTime            @default(now())
   updatedAt            DateTime            @updatedAt
 
-  workspace Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  createdBy User?        @relation("ImportSessionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  items     ImportItem[]
+  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy   User?        @relation("ImportSessionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  sourceAsset Asset?       @relation("ImportSessionSourceAsset", fields: [sourceAssetId], references: [id], onDelete: SetNull)
+  items       ImportItem[]
 
   @@index([workspaceId, provider, status])
   @@map("import_sessions")

@@ -32,10 +32,10 @@ export default async function AboutPage() {
   return (
     <div className="mx-auto max-w-2xl space-y-6 p-8">
       <div className="flex items-center gap-4">
-        {profile.avatarUrl ? (
+        {profile.avatarAsset ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={profile.avatarUrl}
+            src={profile.avatarAsset.url}
             alt={profile.displayName}
             className="h-20 w-20 rounded-full object-cover"
           />

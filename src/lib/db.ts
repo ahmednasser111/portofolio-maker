@@ -26,6 +26,7 @@ const UUID_ID_MODELS = new Set([
   "ProviderConnection",
   "ImportSession",
   "ImportItem",
+  "Asset",
 ]);
 
 function withUuidV7(client: PrismaClient) {

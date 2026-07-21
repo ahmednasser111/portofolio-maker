@@ -11,11 +11,13 @@ import {
   commitImportSession,
   discardImportSession,
 } from "@/domain/imports/service";
+import { stageResumeImport } from "@/domain/providers/resume/provider";
 import {
   noInputSchema,
   stageGithubImportSchema,
   reviewImportItemSchema,
   sessionIdSchema,
+  stageResumeImportSchema,
 } from "./schemas";
 
 async function requireGithubToken(workspaceId: string): Promise<string> {
@@ -73,6 +75,22 @@ export const stageGithubImportAction = createAction({
       drafts: provider.mapToStagedItems(selected),
     });
 
+    return { sessionId: session.id };
+  },
+});
+
+export const stageResumeImportAction = createAction({
+  schema: stageResumeImportSchema,
+  resource: "integrations",
+  action: "write",
+  handler: async (input, { actor }) => {
+    const bytes = Buffer.from(await input.file.arrayBuffer());
+    const session = await stageResumeImport({
+      workspaceId: actor.workspaceId,
+      createdById: actor.userId,
+      filename: input.file.name,
+      bytes,
+    });
     return { sessionId: session.id };
   },
 });

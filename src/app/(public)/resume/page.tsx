@@ -4,6 +4,7 @@ import { getProfile } from "@/features/profile/queries";
 import { requireEnabledPage } from "@/features/navigation/queries";
 import { resolveSeoMetadata } from "@/features/seo/queries";
 import { toMetadata } from "@/features/seo/to-metadata";
+import { getAssetDownloadUrl } from "@/lib/blob";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +18,7 @@ export default async function ResumePage() {
   await requireEnabledPage(workspace.id, "RESUME");
   const profile = await getProfile(workspace.id);
 
-  if (!profile?.resumeUrl) {
+  if (!profile?.publicResumeAsset) {
     return (
       <div className="mx-auto max-w-2xl p-8">
         <h1 className="text-2xl font-semibold">Resume</h1>
@@ -26,24 +27,20 @@ export default async function ResumePage() {
     );
   }
 
+  const previewUrl = profile.publicResumeAsset.url;
+
   return (
     <div className="mx-auto max-w-3xl space-y-4 p-8">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Resume</h1>
         <a
-          href={profile.resumeUrl}
-          target="_blank"
-          rel="noreferrer"
+          href={getAssetDownloadUrl(previewUrl)}
           className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground"
         >
           Download
         </a>
       </div>
-      <iframe
-        src={profile.resumeUrl}
-        title="Resume preview"
-        className="h-[80vh] w-full rounded-md border"
-      />
+      <iframe src={previewUrl} title="Resume preview" className="h-[80vh] w-full rounded-md border" />
     </div>
   );
 }

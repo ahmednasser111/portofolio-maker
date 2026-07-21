@@ -23,12 +23,70 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { richTextToParagraphs } from "@/lib/rich-text";
-import { upsertProfileAction } from "../actions";
+import { upsertProfileAction, uploadAvatarAction, uploadProfileResumeAction } from "../actions";
 import { availabilityOptions, upsertProfileSchema, type UpsertProfileInput } from "../schemas";
 import { availabilityLabels } from "../labels";
-import type { Profile } from "@prisma/client";
+import type { getProfile } from "../queries";
 
-export function ProfileForm({ profile }: { profile: Profile | null }) {
+type ProfileWithAssets = Awaited<ReturnType<typeof getProfile>>;
+
+function AssetUploadField({
+  label,
+  accept,
+  currentUrl,
+  currentFilename,
+  onUpload,
+}: {
+  label: string;
+  accept: string;
+  currentUrl: string | null | undefined;
+  currentFilename: string | null | undefined;
+  onUpload: (file: File) => Promise<{ ok: true } | { ok: false; message: string }>;
+}) {
+  const router = useRouter();
+  const [file, setFile] = useState<File | null>(null);
+  const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  function submit() {
+    if (!file) return;
+    setError(null);
+    startTransition(async () => {
+      const result = await onUpload(file);
+      if (!result.ok) {
+        setError(result.message);
+        return;
+      }
+      setFile(null);
+      router.refresh();
+    });
+  }
+
+  return (
+    <div className="space-y-1">
+      <FormLabel>{label}</FormLabel>
+      {currentUrl ? (
+        <p className="text-xs text-muted-foreground">
+          Current:{" "}
+          <a href={currentUrl} target="_blank" rel="noreferrer" className="underline">
+            {currentFilename ?? "view"}
+          </a>
+        </p>
+      ) : (
+        <p className="text-xs text-muted-foreground">Not set.</p>
+      )}
+      <div className="flex items-center gap-2">
+        <Input type="file" accept={accept} onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+        <Button type="button" size="sm" variant="outline" disabled={!file || isPending} onClick={submit}>
+          {isPending ? "Uploading…" : "Upload"}
+        </Button>
+      </div>
+      {error ? <p className="text-sm text-red-600">{error}</p> : null}
+    </div>
+  );
+}
+
+export function ProfileForm({ profile }: { profile: ProfileWithAssets }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [formError, setFormError] = useState<string | null>(null);
@@ -41,14 +99,12 @@ export function ProfileForm({ profile }: { profile: Profile | null }) {
       position: profile?.position ?? "",
       headline: profile?.headline ?? "",
       bio: richTextToParagraphs(profile?.bio).join("\n\n"),
-      avatarUrl: profile?.avatarUrl ?? "",
       location: profile?.location ?? "",
       availability: profile?.availability ?? "",
       email: profile?.email ?? "",
       phone: profile?.phone ?? "",
       heroCtaLabel: profile?.heroCtaLabel ?? "",
       heroCtaUrl: profile?.heroCtaUrl ?? "",
-      resumeUrl: profile?.resumeUrl ?? "",
     },
   });
 
@@ -127,18 +183,15 @@ export function ProfileForm({ profile }: { profile: Profile | null }) {
         />
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <FormField
-            control={form.control}
-            name="avatarUrl"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Avatar URL</FormLabel>
-                <FormControl>
-                  <Input placeholder="https://…" {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
+          <AssetUploadField
+            label="Avatar"
+            accept="image/png,image/jpeg,image/gif,image/webp"
+            currentUrl={profile?.avatarAsset?.url}
+            currentFilename={profile?.avatarAsset?.filename}
+            onUpload={async (file) => {
+              const result = await uploadAvatarAction({ file });
+              return result.ok ? { ok: true } : { ok: false, message: result.error.message };
+            }}
           />
           <FormField
             control={form.control}
@@ -238,18 +291,15 @@ export function ProfileForm({ profile }: { profile: Profile | null }) {
           />
         </div>
 
-        <FormField
-          control={form.control}
-          name="resumeUrl"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Resume URL</FormLabel>
-              <FormControl>
-                <Input placeholder="https://… (link to a hosted PDF)" {...field} />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
+        <AssetUploadField
+          label="Public resume (powers the /resume page preview & download)"
+          accept="application/pdf"
+          currentUrl={profile?.publicResumeAsset?.url}
+          currentFilename={profile?.publicResumeAsset?.filename}
+          onUpload={async (file) => {
+            const result = await uploadProfileResumeAction({ file });
+            return result.ok ? { ok: true } : { ok: false, message: result.error.message };
+          }}
         />
 
         {formError ? <p className="text-sm text-red-600">{formError}</p> : null}

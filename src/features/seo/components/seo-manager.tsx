@@ -7,18 +7,17 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import type { ActionResult } from "@/lib/create-action";
-import { upsertSeoSettingAction } from "../actions";
-import type { SeoSetting } from "@prisma/client";
+import { upsertSeoSettingAction, uploadSeoOgImageAction } from "../actions";
+import type { Asset, SeoSetting } from "@prisma/client";
 
-type Row = { key: string; label: string; setting: SeoSetting | null };
+type Row = { key: string; label: string; setting: (SeoSetting & { ogImageAsset: Asset | null }) | null };
 
-type FormState = { title: string; description: string; ogImageUrl: string; noindex: boolean };
+type FormState = { title: string; description: string; noindex: boolean };
 
-function toFormState(setting: SeoSetting | null): FormState {
+function toFormState(setting: Row["setting"]): FormState {
   return {
     title: setting?.title ?? "",
     description: setting?.description ?? "",
-    ogImageUrl: setting?.ogImageUrl ?? "",
     noindex: setting?.noindex ?? false,
   };
 }
@@ -28,6 +27,7 @@ export function SeoManager({ rows }: { rows: Row[] }) {
   const [isPending, startTransition] = useTransition();
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(toFormState(null));
+  const [ogImageFile, setOgImageFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   function run(action: Promise<ActionResult<unknown>>, onSuccess?: () => void) {
@@ -66,6 +66,7 @@ export function SeoManager({ rows }: { rows: Row[] }) {
                 variant="outline"
                 onClick={() => {
                   setForm(toFormState(row.setting));
+                  setOgImageFile(null);
                   setOpenKey(row.key);
                   setError(null);
                 }}
@@ -88,11 +89,40 @@ export function SeoManager({ rows }: { rows: Row[] }) {
                 value={form.description}
                 onChange={(e) => setForm({ ...form, description: e.target.value })}
               />
-              <Input
-                placeholder="OG image URL"
-                value={form.ogImageUrl}
-                onChange={(e) => setForm({ ...form, ogImageUrl: e.target.value })}
-              />
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground">
+                  {row.setting?.ogImageAsset ? (
+                    <>
+                      OG image:{" "}
+                      <a href={row.setting.ogImageAsset.url} target="_blank" rel="noreferrer" className="underline">
+                        {row.setting.ogImageAsset.filename}
+                      </a>
+                    </>
+                  ) : (
+                    "No OG image set."
+                  )}
+                </p>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="file"
+                    accept="image/png,image/jpeg,image/gif,image/webp"
+                    onChange={(e) => setOgImageFile(e.target.files?.[0] ?? null)}
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={!ogImageFile || isPending}
+                    onClick={() =>
+                      run(uploadSeoOgImageAction({ page: row.key, file: ogImageFile as File }), () =>
+                        setOgImageFile(null),
+                      )
+                    }
+                  >
+                    Upload
+                  </Button>
+                </div>
+              </div>
               <div className="flex items-center gap-2">
                 <Switch
                   checked={form.noindex}

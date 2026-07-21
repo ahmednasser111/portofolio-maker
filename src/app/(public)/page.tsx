@@ -4,6 +4,7 @@ import { getDefaultWorkspace } from "@/lib/workspace";
 import { getProfile } from "@/features/profile/queries";
 import { availabilityLabels } from "@/features/profile/labels";
 import { richTextToParagraphs } from "@/lib/rich-text";
+import { getAssetDownloadUrl } from "@/lib/blob";
 import { listFeaturedProjects } from "@/features/projects/queries";
 import { listVisibleSocialLinks } from "@/features/social-links/queries";
 import { getActiveThemeTokens } from "@/features/theme/queries";
@@ -52,10 +53,10 @@ export default async function HomePage() {
             : "space-y-3 text-center",
         )}
       >
-        {profile.avatarUrl ? (
+        {profile.avatarAsset ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={profile.avatarUrl}
+            src={profile.avatarAsset.url}
             alt={profile.displayName}
             className={cn(
               "rounded-full object-cover",
@@ -83,11 +84,9 @@ export default async function HomePage() {
                 {profile.heroCtaLabel}
               </Link>
             ) : null}
-            {profile.resumeUrl ? (
+            {profile.publicResumeAsset ? (
               <a
-                href={profile.resumeUrl}
-                target="_blank"
-                rel="noreferrer"
+                href={getAssetDownloadUrl(profile.publicResumeAsset.url)}
                 className="rounded-md border px-4 py-2 text-sm"
               >
                 Download resume
